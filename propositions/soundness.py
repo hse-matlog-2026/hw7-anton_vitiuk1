@@ -29,13 +29,12 @@ def rule_nonsoundness_from_specialization_nonsoundness(
     """
     assert specialization.is_specialization_of(general)
     assert not evaluate_inference(specialization, model)
-    specialization_map = general.specialization_map(specialization)
-    assert specialization_map is not None
-    counterexample_model = {}
-    for variable in general.variables():
-        counterexample_model[variable] = evaluate(specialization_map[variable],
-                                                  model)
-    return counterexample_model
+    spec_map = general.specialization_map(specialization)
+    new_model: Model = {}
+    for v in general.variables():
+        if v in spec_map:
+            new_model[v] = evaluate(spec_map[v], model)
+    return new_model
 
 def nonsound_rule_of_nonsound_proof(proof: Proof, model: Model) -> \
         Tuple[InferenceRule, Model]:
@@ -54,14 +53,15 @@ def nonsound_rule_of_nonsound_proof(proof: Proof, model: Model) -> \
     """
     assert proof.is_valid()
     assert not evaluate_inference(proof.statement, model)
-    for line_number, line in enumerate(proof.lines):
-        if evaluate(line.formula, model):
-            continue
-        assert not line.is_assumption()
-        specialization = proof.rule_for_line(line_number)
-        assert specialization is not None
-        counterexample_model = \
-            rule_nonsoundness_from_specialization_nonsoundness(
-                line.rule, specialization, model)
-        return line.rule, counterexample_model
-    assert False
+    first_false = None
+    for i, line in enumerate(proof.lines):
+        if not evaluate(line.formula, model):
+            first_false = i
+            break
+    line = proof.lines[first_false]
+    used_rule = line.rule
+    specialized_rule = proof.rule_for_line(first_false)
+    counter_model_for_used = rule_nonsoundness_from_specialization_nonsoundness(
+        used_rule, specialized_rule, model
+    )
+    return used_rule, counter_model_for_used

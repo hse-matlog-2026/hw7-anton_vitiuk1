@@ -16,6 +16,7 @@ from propositions.proofs import *
 from propositions.axiomatic_systems import *
 from propositions.deduction import *
 
+
 def formulas_capturing_model(model: Model) -> List[Formula]:
     """Computes the formulas that capture the given model: ``'``\\ `x`\\ ``'``
     for each variable name `x` that is assigned the value ``True`` in the given
@@ -34,12 +35,13 @@ def formulas_capturing_model(model: Model) -> List[Formula]:
         [p1, ~p2, q]
     """
     assert is_model(model)
-    # Task 6.1a
-    return [Formula(variable) if model[variable] else
-            Formula('~', Formula(variable))
-            for variable in sorted(model)]
+    return [
+        Formula(var) if model[var] else Formula('~', Formula(var))
+        for var in sorted(model.keys())
+    ]
 
-def prove_in_model(formula: Formula, model:Model) -> Proof:
+
+def prove_in_model(formula: Formula, model: Model) -> Proof:
     """Either proves the given formula or proves its negation, from the formulas
     that capture the given model.
 
@@ -80,28 +82,35 @@ def prove_in_model(formula: Formula, model:Model) -> Proof:
     """
     assert formula.operators().issubset({'->', '~'})
     assert is_model(model)
-    # Task 6.1b
     assumptions = formulas_capturing_model(model)
-    value = evaluate(formula, model)
-    conclusion = formula if value else Formula('~', formula)
+
     if is_variable(formula.root):
-        return Proof(InferenceRule(assumptions, conclusion),
-                     AXIOMATIC_SYSTEM, [Proof.Line(conclusion)])
-    if formula.root == '~':
-        if value:
-            return prove_in_model(formula.first, model)
-        return prove_corollary(prove_in_model(formula.first, model),
-                               conclusion, NN)
-    assert formula.root == '->'
-    if value:
-        if not evaluate(formula.first, model):
-            return prove_corollary(prove_in_model(formula.first, model),
-                                   formula, I2)
-        return prove_corollary(prove_in_model(formula.second, model),
-                               formula, I1)
-    return combine_proofs(prove_in_model(formula.first, model),
-                          prove_in_model(formula.second, model),
-                          conclusion, NI)
+        captured = formula if model[formula.root] else Formula('~', formula)
+        return Proof(InferenceRule(assumptions, captured),
+                     AXIOMATIC_SYSTEM,
+                     [Proof.Line(captured)])
+
+    if is_unary(formula.root):
+        psi = formula.first
+        if evaluate(formula, model):
+            return prove_in_model(psi, model)
+        proof_psi = prove_in_model(psi, model)
+        return prove_corollary(proof_psi, Formula('~', formula), NN)
+
+    assert is_binary(formula.root) and formula.root == '->'
+    phi, psi = formula.first, formula.second
+
+    if evaluate(formula, model):
+        if not evaluate(phi, model):
+            proof_not_phi = prove_in_model(phi, model)
+            return prove_corollary(proof_not_phi, formula, I2)
+        proof_psi = prove_in_model(psi, model)
+        return prove_corollary(proof_psi, formula, I1)
+
+    proof_phi = prove_in_model(phi, model)
+    proof_not_psi = prove_in_model(psi, model)
+    return combine_proofs(proof_phi, proof_not_psi, Formula('~', formula), NI)
+
 
 def reduce_assumption(proof_from_affirmation: Proof,
                       proof_from_negation: Proof) -> Proof:
@@ -145,10 +154,13 @@ def reduce_assumption(proof_from_affirmation: Proof,
     assert Formula('~', proof_from_affirmation.statement.assumptions[-1]) == \
            proof_from_negation.statement.assumptions[-1]
     assert proof_from_affirmation.rules == proof_from_negation.rules
-    # Task 6.2
-    return combine_proofs(remove_assumption(proof_from_affirmation),
-                          remove_assumption(proof_from_negation),
-                          proof_from_affirmation.statement.conclusion, R)
+
+    conclusion = proof_from_affirmation.statement.conclusion
+
+    proof_imp1 = remove_assumption(proof_from_affirmation)
+    proof_imp2 = remove_assumption(proof_from_negation)
+    return combine_proofs(proof_imp1, proof_imp2, conclusion, R)
+
 
 def prove_tautology(tautology: Formula, model: Model = frozendict()) -> Proof:
     """Proves the given tautology from the formulas that capture the given
@@ -193,17 +205,24 @@ def prove_tautology(tautology: Formula, model: Model = frozendict()) -> Proof:
     assert tautology.operators().issubset({'->', '~'})
     assert is_model(model)
     assert sorted(tautology.variables())[:len(model)] == sorted(model.keys())
-    # Task 6.3a
-    if len(model) == len(tautology.variables()):
+
+    vars_sorted = sorted(tautology.variables())
+
+    if len(model) == len(vars_sorted):
         return prove_in_model(tautology, model)
-    variable = sorted(tautology.variables())[len(model)]
+
+    next_var = vars_sorted[len(model)]
+
     model_true = dict(model)
-    model_true[variable] = True
+    model_true[next_var] = True
+    proof_true = prove_tautology(tautology, model_true)
+
     model_false = dict(model)
-    model_false[variable] = False
-    return reduce_assumption(prove_tautology(tautology, frozendict(model_true)),
-                             prove_tautology(tautology,
-                                             frozendict(model_false)))
+    model_false[next_var] = False
+    proof_false = prove_tautology(tautology, model_false)
+
+    return reduce_assumption(proof_true, proof_false)
+
 
 def proof_or_counterexample(formula: Formula) -> Union[Proof, Model]:
     """Either proves the given formula or finds a model in which it does not
@@ -219,13 +238,14 @@ def proof_or_counterexample(formula: Formula) -> Union[Proof, Model]:
         otherwise a model in which the given formula does not hold.
     """
     assert formula.operators().issubset({'->', '~'})
-    # Task 6.3b
-    if is_tautology(formula):
-        return prove_tautology(formula)
-    for model in all_models(sorted(formula.variables())):
+
+    vars_sorted = sorted(formula.variables())
+    for model in all_models(vars_sorted):
         if not evaluate(formula, model):
             return model
-    assert False
+
+    return prove_tautology(formula)
+
 
 def encode_as_formula(rule: InferenceRule) -> Formula:
     """Encodes the given inference rule as a formula consisting of a chain of
@@ -246,11 +266,13 @@ def encode_as_formula(rule: InferenceRule) -> Formula:
         >>> encode_as_formula(InferenceRule([], Formula('q')))
         q
     """
-    # Task 6.4a
-    formula = rule.conclusion
+    if len(rule.assumptions) == 0:
+        return rule.conclusion
+    result = rule.conclusion
     for assumption in reversed(rule.assumptions):
-        formula = Formula('->', assumption, formula)
-    return formula
+        result = Formula('->', assumption, result)
+    return result
+
 
 def prove_sound_inference(rule: InferenceRule) -> Proof:
     """Proves the given sound inference rule.
@@ -266,29 +288,25 @@ def prove_sound_inference(rule: InferenceRule) -> Proof:
     assert is_sound_inference(rule)
     for formula in {rule.conclusion}.union(rule.assumptions):
         assert formula.operators().issubset({'->', '~'})
-    # Task 6.4b
+
     encoded = encode_as_formula(rule)
-    proof = prove_tautology(encoded)
-    if len(rule.assumptions) == 0:
-        return proof
-    lines = [Proof.Line(assumption) for assumption in rule.assumptions]
-    shift = len(lines)
-    for line in proof.lines:
-        if line.is_assumption():
-            lines.append(line)
-        else:
-            lines.append(Proof.Line(line.formula, line.rule,
-                                    [index + shift
-                                     for index in line.assumptions]))
-    current_formula = encoded
-    current_line = len(lines) - 1
-    for index, assumption in enumerate(rule.assumptions):
-        assert current_formula.root == '->'
-        assert current_formula.first == assumption
-        current_formula = current_formula.second
-        lines.append(Proof.Line(current_formula, MP, [index, current_line]))
-        current_line = len(lines) - 1
-    return Proof(rule, AXIOMATIC_SYSTEM, lines)
+
+    proof_encoded = prove_tautology(encoded)
+    lines = list(proof_encoded.lines)
+
+    current_idx = len(lines) - 1
+
+    for assumption in rule.assumptions:
+        lines.append(Proof.Line(assumption))
+        idx_assumption = len(lines) - 1
+        lines.append(Proof.Line(lines[current_idx].formula.second, MP,
+                                (idx_assumption, current_idx)))
+        current_idx = len(lines) - 1
+
+    statement = InferenceRule(rule.assumptions, rule.conclusion)
+    proof = Proof(statement, AXIOMATIC_SYSTEM, lines)
+    return proof
+
 
 def model_or_inconsistency(formulas: Sequence[Formula]) -> Union[Model, Proof]:
     """Either finds a model in which all the given formulas hold, or proves
@@ -305,15 +323,16 @@ def model_or_inconsistency(formulas: Sequence[Formula]) -> Union[Model, Proof]:
     """
     for formula in formulas:
         assert formula.operators().issubset({'->', '~'})
-    # Task 6.5
-    formulas = tuple(formulas)
-    variables = sorted(set().union(*(formula.variables() for formula in
-                                     formulas)))
-    for model in all_models(variables):
-        if all(evaluate(formula, model) for formula in formulas):
+
+    vars_sorted = sorted(set().union(*(f.variables() for f in formulas)))
+    for model in all_models(vars_sorted):
+        if all(evaluate(f, model) for f in formulas):
             return model
-    return prove_sound_inference(
-        InferenceRule(formulas, Formula.parse('~(p->p)')))
+
+    contradiction = Formula.parse('~(p->p)')
+    rule = InferenceRule(list(formulas), contradiction)
+    return prove_sound_inference(rule)
+
 
 def prove_in_model_full(formula: Formula, model: Model) -> Proof:
     """Either proves the given formula or proves its negation, from the formulas
@@ -358,50 +377,3 @@ def prove_in_model_full(formula: Formula, model: Model) -> Proof:
     assert formula.operators().issubset({'T', 'F', '->', '~', '&', '|'})
     assert is_model(model)
     # Optional Task 6.6
-    assumptions = formulas_capturing_model(model)
-    value = evaluate(formula, model)
-    conclusion = formula if value else Formula('~', formula)
-    if is_variable(formula.root):
-        return Proof(InferenceRule(assumptions, conclusion),
-                     AXIOMATIC_SYSTEM_FULL, [Proof.Line(conclusion)])
-    if is_constant(formula.root):
-        rule = T if formula.root == 'T' else NF
-        return Proof(InferenceRule(assumptions, conclusion),
-                     AXIOMATIC_SYSTEM_FULL,
-                     [Proof.Line(conclusion, rule, [])])
-    if formula.root == '~':
-        if value:
-            return prove_in_model_full(formula.first, model)
-        return prove_corollary(prove_in_model_full(formula.first, model),
-                               conclusion, NN)
-    if formula.root == '->':
-        if value:
-            if not evaluate(formula.first, model):
-                return prove_corollary(prove_in_model_full(formula.first,
-                                                           model),
-                                       formula, I2)
-            return prove_corollary(prove_in_model_full(formula.second, model),
-                                   formula, I1)
-        return combine_proofs(prove_in_model_full(formula.first, model),
-                              prove_in_model_full(formula.second, model),
-                              conclusion, NI)
-    if formula.root == '&':
-        if value:
-            return combine_proofs(prove_in_model_full(formula.first, model),
-                                  prove_in_model_full(formula.second, model),
-                                  formula, A)
-        if not evaluate(formula.first, model):
-            return prove_corollary(prove_in_model_full(formula.first, model),
-                                   conclusion, NA2)
-        return prove_corollary(prove_in_model_full(formula.second, model),
-                               conclusion, NA1)
-    assert formula.root == '|'
-    if value:
-        if evaluate(formula.first, model):
-            return prove_corollary(prove_in_model_full(formula.first, model),
-                                   formula, O2)
-        return prove_corollary(prove_in_model_full(formula.second, model),
-                               formula, O1)
-    return combine_proofs(prove_in_model_full(formula.first, model),
-                          prove_in_model_full(formula.second, model),
-                          conclusion, NO)

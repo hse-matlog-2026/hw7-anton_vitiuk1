@@ -344,9 +344,8 @@ def evaluate_inference(rule: InferenceRule, model: Model) -> bool:
         True
     """
     assert is_model(model)
-    assert rule.variables().issubset(variables(model))
-    for assumption in rule.assumptions:
-        if not evaluate(assumption, model):
+    for x in rule.assumptions:
+        if not evaluate(x, model):
             return True
     return evaluate(rule.conclusion, model)
 
